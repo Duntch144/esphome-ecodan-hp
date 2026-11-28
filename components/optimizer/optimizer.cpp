@@ -67,6 +67,41 @@ namespace esphome
                     });
                 });
             }
+
+            // Initialize compressor start time if already ON at boot
+            if (this->state_.status_compressor != nullptr && this->state_.status_compressor->state) {
+                this->compressor_start_time_ = millis();
+                ESP_LOGI(OPTIMIZER_TAG, "Compressor already ON at boot, initializing start time");
+            }
+
+            // --- Load Integral Error from NVS ---
+            this->integral_pref_ = esphome::global_preferences->make_preference<float>(esphome::fnv1_hash("optimizer.integral_error_z1"));
+            float saved_integral = 0.0f;
+            if (this->integral_pref_.load<float>(&saved_integral) && !std::isnan(saved_integral)) {
+                this->integral_error_z1_ = saved_integral;
+                this->last_saved_integral_ = saved_integral;
+                ESP_LOGD(OPTIMIZER_TAG, "Loaded saved integral_error_z1_: %.3f", saved_integral);
+            } else {
+                ESP_LOGD(OPTIMIZER_TAG, "No saved integral_error_z1_, using default %.3f", this->integral_error_z1_);
+            }
+
+            // --- Load Feed-Forward Model from NVS ---
+            this->ff_slope_pref_ = esphome::global_preferences->make_preference<float>(esphome::fnv1_hash("optimizer.ff_slope"));
+            if (this->ff_slope_pref_.load<float>(&this->ff_slope_)) {
+                ESP_LOGD(OPTIMIZER_FF_TAG, "Loaded saved ff_slope: %.4f", this->ff_slope_);
+            }
+
+            this->ff_intercept_pref_ = esphome::global_preferences->make_preference<float>(esphome::fnv1_hash("optimizer.ff_intercept"));
+            if (this->ff_intercept_pref_.load<float>(&this->ff_intercept_)) {
+                ESP_LOGD(OPTIMIZER_FF_TAG, "Loaded saved ff_intercept: %.4f", this->ff_intercept_);
+            }
+
+            this->ff_updates_pref_ = esphome::global_preferences->make_preference<int>(esphome::fnv1_hash("optimizer.ff_updates"));
+            if (this->ff_updates_pref_.load<int>(&this->ff_updates_count_)) {
+                ESP_LOGI(OPTIMIZER_FF_TAG, "Loaded ff_updates_count: %d", this->ff_updates_count_);
+            } else {
+                this->ff_updates_count_ = 0;
+            }
         }
 
         bool Optimizer::aa_enabled() const {

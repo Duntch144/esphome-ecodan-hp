@@ -18,52 +18,50 @@ namespace esphome
             HeatingProfile p;
             if (type_index <= 1) {
                 // UFH
-                p.base_min_delta_t    = 2.0f;
+                p.base_min_delta_t     = 2.0f;
                 p.min_delta_cold_limit = 4.0f;
-                p.max_delta_t         = 6.5f;
-                p.max_error_range     = 2.0f;
-                p.defrost_memory_ms   = 35 * 60 * 1000UL;
+                p.max_delta_t          = 6.5f;
+                p.max_error_range      = 2.0f;
+                p.defrost_memory_ms    = 35 * 60 * 1000UL;
             } else if (type_index <= 3) {
                 // Hybrid
-                p.base_min_delta_t    = 3.0f;
+                p.base_min_delta_t     = 3.0f;
                 p.min_delta_cold_limit = 5.0f;
-                p.max_delta_t         = 8.0f;
-                p.max_error_range     = 2.0f;
-                p.defrost_memory_ms   = 25 * 60 * 1000UL;
+                p.max_delta_t          = 8.0f;
+                p.max_error_range      = 2.0f;
+                p.defrost_memory_ms    = 25 * 60 * 1000UL;
             } else {
                 // Radiator
-                p.base_min_delta_t    = 4.0f;
+                p.base_min_delta_t     = 4.0f;
                 p.min_delta_cold_limit = 6.0f;
-                p.max_delta_t         = 10.0f;
-                p.max_error_range     = 1.5f;
-                p.defrost_memory_ms   = 15 * 60 * 1000UL;
+                p.max_delta_t          = 10.0f;
+                p.max_error_range      = 1.5f;
+                p.defrost_memory_ms    = 15 * 60 * 1000UL;
             }
             return p;
         }
 
         // ─────────────────────────────────────────────────────────────────
-        // defrost sates — locked during/after defrost
+        // Defrost states — locked during/after defrost
         // ─────────────────────────────────────────────────────────────────
 
         Optimizer::DefrostState Optimizer::resolve_defrost_state_() {
             auto &status = this->state_.ecodan_instance->get_status();
             const uint32_t LOCK_DURATION_MS = 15 * 60 * 1000;
-            bool in_lock_window = (this->last_defrost_time_ > 0) && 
+            bool in_lock_window = (this->last_defrost_time_ > 0) &&
                                   ((millis() - this->last_defrost_time_) < LOCK_DURATION_MS);
 
             if (status.DefrostActive || in_lock_window) {
-                ESP_LOGD(OPTIMIZER_TAG, "Using locked defrost states: outside temp: %.1f, hp return: %.1f, z1 return: %.1f, z2 return: %.1f for adaptive calculations.", 
-                    this->state_before_defrost_.locked_outside_temp_, this->state_before_defrost_.locked_return_temp_, 
+                ESP_LOGD(OPTIMIZER_TAG, "Using locked defrost states: outside temp: %.1f, hp return: %.1f, z1 return: %.1f, z2 return: %.1f for adaptive calculations.",
+                    this->state_before_defrost_.locked_outside_temp_, this->state_before_defrost_.locked_return_temp_,
                     this->state_before_defrost_.locked_return_temp_z1_, this->state_before_defrost_.locked_return_temp_z2_);
             }
             else {
-                // clear state, outside defrost window
                 this->state_before_defrost_ = DefrostState{};
             }
 
             return this->state_before_defrost_;
         }
-
 
         // ─────────────────────────────────────────────────────────────────
         // Heating flow calculation (Delta-T + defrost ramp + step-down)
@@ -105,7 +103,7 @@ namespace esphome
 
             // Defrost recovery ramp
             const float DEFROST_RISK_MIN = -2.0f, DEFROST_RISK_MAX = 3.0f;
-            bool defrost_enabled = this->state_.defrost_risk_handling_enabled->state;
+            bool defrost_enabled = this->state_.defrost_risk_handling_enabled != nullptr && this->state_.defrost_risk_handling_enabled->state;
             bool is_defrost_weather = false;
             uint32_t now = millis();
 
@@ -116,15 +114,14 @@ namespace esphome
             }
 
             if (is_defrost_weather && defrost_enabled) {
-                float ratio       = std::clamp((float)(now - this->last_defrost_time_) / prof.defrost_memory_ms, 0.0f, 1.0f);
+                float ratio        = std::clamp((float)(now - this->last_defrost_time_) / prof.defrost_memory_ms, 0.0f, 1.0f);
                 float ramped_delta = prof.base_min_delta_t + fmax(target_delta - prof.base_min_delta_t, 0.0f) * ratio;
-                calculated_flow   = actual_return_temp + ramped_delta;
-                calculated_flow   = this->round_nearest(calculated_flow);
+                calculated_flow    = actual_return_temp + ramped_delta;
+                calculated_flow    = this->round_nearest(calculated_flow);
                 ESP_LOGW(OPTIMIZER_TAG, "Z%d Defrost Recovery: %.0f%% done. Flow: %.2f",
                          (zone_i + 1), ratio * 100.0f, calculated_flow);
             } else {
                 if (set_point_reached) {
-                    // Setpoint reached — fall back to base delta
                     calculated_flow = actual_return_temp + prof.base_min_delta_t;
                     ESP_LOGD(OPTIMIZER_TAG, "Z%d Setpoint reached. Base delta T.", (zone_i + 1));
                 } else {
@@ -134,10 +131,6 @@ namespace esphome
                 ESP_LOGD(OPTIMIZER_TAG, "Z%d HEATING: flow=%.2f°C, return=%.2f°C", (zone_i + 1), calculated_flow, actual_return_temp);
             }
 
-            // Write-path limits (short-cycle guard, rounding, step limit
-            // vs. actual feed, zone clamp) — shared with the ODIN forwarder.
-            // The guard uses the (possibly defrost-locked) return temp and is
-            // skipped during the defrost recovery ramp — pre-refactor behavior.
             calculated_flow = this->apply_flow_limits(
                 (zone_i == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2,
                 calculated_flow, target_delta,
@@ -162,13 +155,10 @@ namespace esphome
                 calculated_flow = this->state_.cooling_smart_start_temp->state;
             } else {
                 calculated_flow = actual_return_temp - target_delta_t;
-
                 ESP_LOGD(OPTIMIZER_TAG, "Z%d COOLING: calc=%.1f°C (return %.1f - delta %.1f)",
                          (zone_i + 1), calculated_flow, actual_return_temp, target_delta_t);
             }
 
-            // Write-path limits (short-cycle guard, step limit vs. actual
-            // feed, cooling clamp) — shared with the ODIN forwarder.
             calculated_flow = this->apply_flow_limits(
                 (zone_i == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2,
                 calculated_flow, target_delta_t, actual_return_temp);
@@ -177,7 +167,7 @@ namespace esphome
         }
 
         // ─────────────────────────────────────────────────────────────────
-        // Per-zone adaptive processing
+        // Per-zone adaptive processing (PI + FF on Z1, deadband, fixed min ΔT)
         // ─────────────────────────────────────────────────────────────────
 
         void Optimizer::process_adaptive_zone_(std::size_t i,
@@ -188,24 +178,22 @@ namespace esphome
                                                float zone_max, float zone_min,
                                                float &out_flow_heat,
                                                float &out_flow_cool) {
-            auto zone = (i == 0) ? esphome::ecodan::Zone::ZONE_1 : esphome::ecodan::Zone::ZONE_2;
+            (void)cold_factor;
+            constexpr float PROPORTIONAL_DEADBAND = 0.21f;
 
-            if (this->vt_is_off_((i == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2)) {
+            auto zone = (i == 0) ? esphome::ecodan::Zone::ZONE_1 : esphome::ecodan::Zone::ZONE_2;
+            auto opt_zone = (i == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2;
+
+            if (this->vt_is_off_(opt_zone)) {
                 ESP_LOGD(OPTIMIZER_TAG, "Z%d virtual thermostat OFF — zone skipped by auto-adaptive.", (i + 1));
                 return;
             }
-            // ODIN is in direct control via the MQTT forwarder: it is the
-            // sole writer of the flow setpoint. Computing and writing a local
-            // value would fight ODIN on every 5-minute cycle. The AA loop
-            // keeps running (lockouts, DHW, stats) but leaves zone flow
-            // control to ODIN while it holds a valid command. It resumes
-            // writing when the forwarder releases (valid_until expired /
-            // ODIN unreachable — the designed ASGARD 2b.5 failure case); the
-            // live takeover sensor clears on that release.
+
             if (this->odin_owns_flow_setpoint()) {
                 ESP_LOGD(OPTIMIZER_TAG, "Z%d ODIN owns the flow setpoint — AA write skipped.", (i + 1));
                 return;
             }
+
             auto heating_type_index = this->state_.heating_system_type->active_index().value_or(0);
 
             bool is_heating_mode   = status.is_auto_adaptive_heating(zone);
@@ -222,17 +210,161 @@ namespace esphome
                     is_heating_active = true;
             }
 
-            if (!is_heating_mode && !is_cooling_mode) return;
+            if (!is_heating_mode && !is_cooling_mode) {
+                if (i == 0 && this->integral_error_z1_ != 0.0f) {
+                    this->integral_error_z1_ = 0.0f;
+                    if (!std::isnan(this->last_saved_integral_)) {
+                        this->integral_pref_.save<float>(&this->integral_error_z1_);
+                        this->last_saved_integral_ = this->integral_error_z1_;
+                    }
+                }
+                return;
+            }
 
-            float room_temp         = this->get_room_current_temp((i == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2);
-            float room_target_temp  = this->get_room_target_temp((i == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2);
-            float actual_flow_temp  = this->get_feed_temp((i == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2);
-            float flow_rate = status.FlowRate;
+            float room_temp          = this->get_room_current_temp(opt_zone);
+            float room_target_temp   = this->get_room_target_temp(opt_zone);
+            float actual_flow_temp   = this->get_feed_temp(opt_zone);
+            float actual_return_temp = this->get_return_temp(opt_zone);
+            float flow_rate          = status.FlowRate;
 
             if (isnan(room_temp) || isnan(room_target_temp) || isnan(actual_flow_temp)) return;
 
-            float setpoint_bias = this->state_.auto_adaptive_setpoint_bias->state;
+            float setpoint_bias = (this->state_.auto_adaptive_setpoint_bias != nullptr) ? this->state_.auto_adaptive_setpoint_bias->state : 0.0f;
             if (isnan(setpoint_bias)) setpoint_bias = 0.0f;
+
+            // Fixed min Delta-T and error range (cold_factor disabled)
+            bool  use_linear            = (heating_type_index % 2 != 0);
+            float effective_error_range = prof.max_error_range;
+            float dynamic_min           = prof.base_min_delta_t;
+
+            float total_bias = setpoint_bias;
+
+            // ── Zone 1 Master PI + Feed-Forward ───────────────────────────
+            if (i == 0) {
+                bool ff_model_ready = (this->ff_updates_count_ > 0) &&
+                                      !std::isnan(this->ff_slope_) &&
+                                      !std::isnan(this->ff_intercept_);
+                bool ff_control_active = (this->state_.ff_control_enabled != nullptr) &&
+                                         this->state_.ff_control_enabled->state &&
+                                         ff_model_ready;
+                float feed_forward_bias = ff_control_active
+                    ? std::clamp((this->ff_slope_ * actual_outside_temp) + this->ff_intercept_, -MAX_INTEGRAL_BIAS, MAX_INTEGRAL_BIAS)
+                    : 0.0f;
+
+                float raw_error = room_target_temp - room_temp;
+                bool integrator_step_applied = false;
+
+                if (is_heating_active || is_cooling_active) {
+                    float ki = 0.05f;
+                    if (this->state_.integral_gain != nullptr && !std::isnan(this->state_.integral_gain->state)) {
+                        ki = this->state_.integral_gain->state;
+                    }
+                    float integration_step = raw_error * ki;
+                    bool apply_step = (ki > 0.0f);
+
+                    // Do not integrate on large setpoint jumps
+                    if (std::abs(raw_error) > 0.6f) {
+                        apply_step = false;
+                    }
+
+                    // Anti-windup with proportional deadband and unwinding allowed
+                    const float DELTA_LIMIT_EPS = 0.01f;
+                    float prospective_integral = this->integral_error_z1_ + integration_step;
+                    float prospective_bias = setpoint_bias + feed_forward_bias + prospective_integral;
+
+                    float raw_error_mode = is_heating_mode ? raw_error : -raw_error;
+                    float prospective_prop_error = (std::abs(raw_error_mode) <= PROPORTIONAL_DEADBAND) ? 0.0f : raw_error_mode;
+                    float prospective_bias_contrib = is_heating_mode ? prospective_bias : -prospective_bias;
+                    float prospective_error = prospective_prop_error + prospective_bias_contrib;
+
+                    float prospective_pos = fmax(prospective_error, 0.0f);
+                    float prospective_x = fmin(prospective_pos / effective_error_range, 1.0f);
+                    float prospective_profile = use_linear ? prospective_x : prospective_x * prospective_x * (3.0f - 2.0f * prospective_x);
+                    float prospective_target_delta_t = dynamic_min + prospective_profile * (prof.max_delta_t - dynamic_min);
+
+                    bool is_unwinding = (this->integral_error_z1_ > 0.0f && integration_step < 0.0f) ||
+                                        (this->integral_error_z1_ < 0.0f && integration_step > 0.0f);
+                    bool step_increases_demand = is_heating_mode ? (integration_step > 0.0f) : (integration_step < 0.0f);
+
+                    if (!is_unwinding) {
+                        if (step_increases_demand && prospective_target_delta_t >= (prof.max_delta_t - DELTA_LIMIT_EPS)) {
+                            apply_step = false;
+                        } else if (!step_increases_demand && prospective_error < 0.0f) {
+                            apply_step = false;
+                        }
+                    }
+
+                    // Anti-windup on flow temperature limits
+                    if (is_heating_mode && !is_unwinding) {
+                        if (actual_flow_temp >= zone_max && integration_step > 0.0f) {
+                            ESP_LOGD(OPTIMIZER_TAG, "Z1: Max flow temp reached (%.1f >= %.1f). Integrator step blocked.", actual_flow_temp, zone_max);
+                            apply_step = false;
+                        }
+                        else if (integration_step > 0.0f && actual_flow_temp >= (zone_max - 1.0f)) apply_step = false;
+                        else if (integration_step < 0.0f && actual_flow_temp <= (zone_min + 1.0f)) apply_step = false;
+                    }
+
+                    if (apply_step) {
+                        this->integral_error_z1_ = std::clamp(this->integral_error_z1_ + integration_step, -MAX_INTEGRAL_BIAS, MAX_INTEGRAL_BIAS);
+                        integrator_step_applied = true;
+                    }
+                }
+
+                // Feed-Forward Data Collection (stable regime only)
+                if (this->state_.ff_learning_enabled != nullptr && this->state_.ff_learning_enabled->state && integrator_step_applied) {
+                    uint32_t compressor_run_time = (this->compressor_start_time_ == 0) ? 0 : (millis() - this->compressor_start_time_);
+                    float min_compressor_time_s = (this->state_.minimum_compressor_on_time != nullptr)
+                        ? (this->state_.minimum_compressor_on_time->state * 60.0f) : 300.0f;
+                    bool is_stable = is_heating_active && (compressor_run_time > min_compressor_time_s * 1000.0f) && std::abs(raw_error) < 0.25f;
+
+                    ESP_LOGD(OPTIMIZER_FF_TAG, "FF Stability: heating_active=%d, comp_runtime=%.1fs (min=%.1fs), raw_error=%.3f, is_stable=%d",
+                        is_heating_active, compressor_run_time / 1000.0f, min_compressor_time_s, raw_error, is_stable);
+
+                    if (is_stable && this->learning_data_.size() < 1500) {
+                        float total_learned_bias = std::clamp(this->integral_error_z1_ + feed_forward_bias, -MAX_INTEGRAL_BIAS, MAX_INTEGRAL_BIAS);
+                        this->learning_data_.push_back({actual_outside_temp, total_learned_bias});
+                        ESP_LOGI(OPTIMIZER_FF_TAG, "FF Learning - Point collected: Temp=%.2f, TotalBias=%.3f (Int=%.3f + FF=%.3f) | Buffer: %zu",
+                                 actual_outside_temp, total_learned_bias, this->integral_error_z1_, feed_forward_bias,
+                                 this->learning_data_.size());
+                    }
+                }
+
+                // Derivative term (disabled by default, DERIVATIVE_GAIN = 0.0f)
+                uint32_t now = millis();
+                if (this->last_derivative_time_ != 0 && !std::isnan(this->last_room_temp_z1_)) {
+                    float dt = (now - this->last_derivative_time_) / 1000.0f;
+                    if (dt > 60.0f && dt < 900.0f) {
+                        float slope = (room_temp - this->last_room_temp_z1_) / dt;
+                        const float DERIVATIVE_GAIN = 0.0f;
+                        this->derivative_term_ = slope * DERIVATIVE_GAIN;
+                    }
+                }
+                this->last_room_temp_z1_ = room_temp;
+                this->last_derivative_time_ = now;
+
+                // Combine PI + Feed-Forward
+                total_bias += this->integral_error_z1_ - this->derivative_term_ + feed_forward_bias;
+
+                // Gently decay integral toward 0 ONLY when a valid FF model is actively controlling
+                // AND the PI integrator was not blocked by anti-windup or compressor stop.
+                if (ff_control_active && integrator_step_applied) {
+                    this->integral_error_z1_ *= 0.9952f;
+                }
+
+                // Persist updated integral error to NVS when changed significantly
+                if (integrator_step_applied &&
+                    (std::isnan(this->last_saved_integral_) || std::fabs(this->integral_error_z1_ - this->last_saved_integral_) > 0.01f)) {
+                    this->integral_pref_.save<float>(&this->integral_error_z1_);
+                    this->last_saved_integral_ = this->integral_error_z1_;
+                }
+
+                this->total_bias_ = total_bias;
+                ESP_LOGD(OPTIMIZER_TAG, "Z1 PI+FF: RawErr=%.3f, IntErr=%.3f, Deriv=%.3f, FFBias=%.3f, TotalBias=%.3f",
+                         raw_error, this->integral_error_z1_, this->derivative_term_, feed_forward_bias, total_bias);
+                if (this->state_.total_bias_sensor != nullptr) {
+                    this->state_.total_bias_sensor->publish_state(total_bias);
+                }
+            }
 
             auto *fb_src = (i == 0) ? this->state_.temperature_feedback_source_z1
                                     : this->state_.temperature_feedback_source_z2;
@@ -240,43 +372,49 @@ namespace esphome
                 ? fb_src->active_index().value_or(0) : 0;
 
             ESP_LOGD(OPTIMIZER_TAG,
-                "Z%d src=%d room=%.1f target=%.1f flow=%.1f flow_rate=%.1f outside=%.1f bias=%.1f H=%d C=%d",
+                "Z%d src=%d room=%.1f target=%.1f flow=%.1f flow_rate=%.1f outside=%.1f total_bias=%.2f H=%d C=%d",
                 (i + 1), feedback_src, room_temp, room_target_temp,
-                actual_flow_temp, flow_rate, actual_outside_temp, setpoint_bias, is_heating_active, is_cooling_active);
-            
-            room_target_temp += setpoint_bias;
+                actual_flow_temp, flow_rate, actual_outside_temp, total_bias, is_heating_active, is_cooling_active);
 
-            float error           = is_heating_mode ? (room_target_temp - room_temp) : (room_temp - room_target_temp);
-            bool  use_linear      = (heating_type_index % 2 != 0);
-            float error_positive  = fmax(error, 0.0f);
+            // Proportional deadband (±0.21°C) + bias contribution
+            float raw_error_for_deadband = is_heating_mode ? (room_target_temp - room_temp) : (room_temp - room_target_temp);
+            float active_prop_error = (std::abs(raw_error_for_deadband) <= PROPORTIONAL_DEADBAND) ? 0.0f : raw_error_for_deadband;
+            float bias_contribution = is_heating_mode ? total_bias : -total_bias;
+            float error             = active_prop_error + bias_contribution;
 
-            // Scale max_error_range down with cold_factor so the system reaches
-            // full output at a smaller room error when it's cold outside.
-            float effective_error_range = prof.max_error_range * (1.0f - 0.5f * std::min(cold_factor, 1.0f));
-            float x               = fmin(error_positive / effective_error_range, 1.0f);
-            float error_factor    = use_linear ? x : x * x * (3.0f - 2.0f * x);
-            float smart_boost     = is_heating_mode ? this->calculate_smart_boost(heating_type_index, error) : 1.0f;
-            float dynamic_min     = prof.base_min_delta_t + cold_factor * (prof.min_delta_cold_limit - prof.base_min_delta_t);
+            ESP_LOGD(OPTIMIZER_TAG, "Z%d Deadband Split: RawErr=%.3f (Active=%.3f), Bias=%.3f, EffErr=%.3f",
+                     (i + 1), raw_error_for_deadband, active_prop_error, bias_contribution, error);
 
-            bool set_point_reached = error < 0.0f;
+            // Profile and Delta-T on fixed base_min_delta_t (no smart_boost)
+            float error_positive    = fmax(error, 0.0f);
+            float x                 = fmin(error_positive / effective_error_range, 1.0f);
+            float error_factor      = use_linear ? x : x * x * (3.0f - 2.0f * x);
+            float smart_boost       = 1.0f;
+            bool  set_point_reached = error <= 0.0f;
 
             float target_delta = dynamic_min + error_factor * smart_boost * (prof.max_delta_t - dynamic_min);
-            ESP_LOGD(OPTIMIZER_TAG,
-                "Z%d target_delta=%.2f cold_factor=%.2f dyn_min=%.2f eff_range=%.2f error_factor=%.2f boost=%.2f linear=%d",
-                (i + 1), target_delta, cold_factor, dynamic_min, effective_error_range, error_factor, smart_boost, use_linear);
+            if (i == 0) {
+                this->target_delta_t_ = set_point_reached ? prof.base_min_delta_t : target_delta;
+                if (this->state_.target_delta_t_sensor != nullptr) {
+                    this->state_.target_delta_t_sensor->publish_state(this->target_delta_t_);
+                }
+            }
 
-            // don't enforce is_heating_active, since some setup rely on flow temp diff, to start the heating
+            ESP_LOGD(OPTIMIZER_TAG,
+                "Z%d target_delta=%.2f cold_factor=0.00 dyn_min=%.2f eff_range=%.2f error_factor=%.2f boost=%.2f linear=%d",
+                (i + 1), target_delta, dynamic_min, effective_error_range, error_factor, smart_boost, use_linear);
+
             if (is_heating_mode) {
+                // cold_factor = 0.0f so calculate_heating_flow_ uses prof.base_min_delta_t
                 out_flow_heat = this->calculate_heating_flow_(
                     i, status, prof, set_point_reached,
-                    cold_factor, actual_outside_temp,
+                    0.0f, actual_outside_temp,
                     zone_min, zone_max, error_factor, smart_boost);
 
-                float step_feed = this->step_limit_feed((i == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2);
+                float step_feed = this->step_limit_feed(opt_zone);
                 if (this->is_post_dhw_window(status) && !isnan(step_feed) &&
                     std::fabs(step_feed - out_flow_heat) >= MAX_FEED_STEP_CHANGE)
                 {
-                    // enforce_step_limit does invese of what we need, so custom stepper here
                     float trailed = this->round_nearest(step_feed - 0.5f);
                     ESP_LOGI(OPTIMIZER_TAG,
                         "Z%d Post-DHW: trailing flow %.2f°C instead of target %.2f°C",
@@ -299,15 +437,15 @@ namespace esphome
             }
             this->adaptive_loop_running_ = true;
 
+            if (this->state_.total_bias_sensor != nullptr && !std::isnan(this->total_bias_)) {
+                this->state_.total_bias_sensor->publish_state(this->total_bias_);
+            }
+
             bool aa_enabled = this->aa_enabled();
             auto *override_z1 = this->state_.sw_odin_override_z1;
             auto *override_z2 = this->state_.sw_odin_override_z2;
 
-            // If the user disables Auto Adaptive, we must ensure the hardware relays are released.
             if (!aa_enabled) {
-                // While the ODIN forwarder is still holding a valid command,
-                // it owns the relay override. Releasing it here would hand
-                // the relay back to the virtual thermostat under ODIN's feet.
                 if (!this->odin_forwarder_takeover_active()) {
                     bool z1_locked = override_z1 != nullptr && override_z1->state;
                     bool z2_locked = override_z2 != nullptr && override_z2->state;
@@ -318,13 +456,9 @@ namespace esphome
                         if (override_z2 != nullptr && override_z2->state) override_z2->turn_off();
                     }
                 }
-            }
-            else {
-                // AA enabled: the override belongs to the ODIN forwarder only
-                // while it holds a valid command. Outside takeover the virtual
-                // thermostat must keep owning the relay — otherwise a released
-                // or absent ODIN freezes the demand here and the local
-                // fallback never survives the next AA cycle.
+                this->adaptive_loop_running_ = false;
+                return;
+            } else {
                 bool hold = this->odin_forwarder_takeover_active();
                 if (override_z1 != nullptr && override_z1->state != hold)
                     hold ? override_z1->turn_on() : override_z1->turn_off();
@@ -332,13 +466,7 @@ namespace esphome
                     hold ? override_z2->turn_on() : override_z2->turn_off();
             }
 
-            if (!aa_enabled) {
-                this->adaptive_loop_running_ = false;
-                return;
-            }
-
             auto &status = this->state_.ecodan_instance->get_status();
-
 
             if (this->is_system_hands_off(status)) {
                 ESP_LOGD(OPTIMIZER_TAG, "System is busy (DHW/Defrost/Lockout). Exiting.");
@@ -367,8 +495,13 @@ namespace esphome
                 return;
             }
 
-            auto defrost_state = this->resolve_defrost_state_();
+            // Lazy init compressor start time if already running
+            if (this->compressor_start_time_ == 0 && this->state_.status_compressor != nullptr && this->state_.status_compressor->state) {
+                this->compressor_start_time_ = millis();
+                ESP_LOGI(OPTIMIZER_TAG, "Compressor detected ON, runtime tracking initialized (lazy init)");
+            }
 
+            auto defrost_state = this->resolve_defrost_state_();
             float actual_outside_temp = isnan(defrost_state.locked_outside_temp_) ? status.OutsideTemperature : defrost_state.locked_outside_temp_;
             if (isnan(actual_outside_temp)) {
                 this->adaptive_loop_running_ = false;
@@ -378,10 +511,22 @@ namespace esphome
             auto heating_type_index = this->state_.heating_system_type->active_index().value_or(0);
             auto prof = this->get_heating_profile_(heating_type_index);
 
-            // Cold factor: quadratic, expanded to 1.5
-            const float MILD = 15.0f, COLD = -5.0f;
-            float cf_raw   = (MILD - std::clamp(actual_outside_temp, COLD, MILD)) / (MILD - COLD);
-            float cold_factor = cf_raw * cf_raw * 1.5f;
+            // Override Delta-T bounds from user settings in Home Assistant
+            if (this->state_.base_min_delta_t != nullptr && !std::isnan(this->state_.base_min_delta_t->state)) {
+                prof.base_min_delta_t = this->state_.base_min_delta_t->state;
+                if (prof.min_delta_cold_limit < prof.base_min_delta_t) {
+                    prof.min_delta_cold_limit = prof.base_min_delta_t;
+                }
+            }
+            if (this->state_.max_delta_t != nullptr && !std::isnan(this->state_.max_delta_t->state)) {
+                prof.max_delta_t = this->state_.max_delta_t->state;
+                if (prof.max_delta_t <= prof.base_min_delta_t) {
+                    prof.max_delta_t = prof.base_min_delta_t + 2.0f;
+                }
+            }
+
+            // Cold factor disabled (fixed base_min_delta_t and max_error_range)
+            float cold_factor = 0.0f;
 
             ESP_LOGD(OPTIMIZER_TAG,
                 "[*] Auto-adaptive cycle: independent_zone_temps=%d has_cooling=%d cold_factor=%.2f min_delta=%.2f max_delta=%.2f multizone_status=%d operation=%d",
@@ -420,39 +565,62 @@ namespace esphome
                     flows_heat[i], flows_cool[i]);
             }
 
-            bool heating_demand = flows_heat[0] > 0.0f || flows_heat[1] > 0.0f;
-            bool cooling_demand = flows_cool[0] < 100.0f || flows_cool[1] < 100.0f;
+            // Auto-trigger Feed-Forward regression every 24h (min 50 pts) or when buffer is full
+            static uint32_t last_auto_calc_time = 0;
+            const uint32_t MIN_TIME_BETWEEN_CALCS = 24 * 60 * 60 * 1000UL;
+            bool should_auto_calc = (this->learning_data_.size() >= 50 &&
+                                    (millis() - last_auto_calc_time) > MIN_TIME_BETWEEN_CALCS) ||
+                                    (this->learning_data_.size() >= 1500);
+            if (should_auto_calc) {
+                ESP_LOGI(OPTIMIZER_FF_TAG, "=== AUTO REGRESSION TRIGGERED === | Buffer: FF=%zu",
+                         this->learning_data_.size());
+                this->calculate_regression();
+                last_auto_calc_time = millis();
+            }
 
-            if (status.has_independent_zone_temps()) {
-                if (heating_demand) {
-                    if (status.is_auto_adaptive_heating(esphome::ecodan::Zone::ZONE_1) &&
-                        status.Zone1FlowTemperatureSetPoint != flows_heat[0])
-                        set_flow_temp(flows_heat[0], OptimizerZone::ZONE_1);
+            // Smart Grid safety: block flow commands while SG OFF mode is active
+            bool sg_off_active = (this->state_.sg_mode_off != nullptr && this->state_.sg_mode_off->state);
 
-                    if (max_zones > 1 && status.is_auto_adaptive_heating(esphome::ecodan::Zone::ZONE_2) &&
-                        status.Zone2FlowTemperatureSetPoint != flows_heat[1])
-                        set_flow_temp(flows_heat[1], OptimizerZone::ZONE_2);
+            if (!sg_off_active) {
+                bool heating_demand = flows_heat[0] > 0.0f || flows_heat[1] > 0.0f;
+                bool cooling_demand = flows_cool[0] < 100.0f || flows_cool[1] < 100.0f;
 
-                } else if (cooling_demand) {
-                    if (status.is_auto_adaptive_cooling(esphome::ecodan::Zone::ZONE_1) &&
-                        status.Zone1FlowTemperatureSetPoint != flows_cool[0])
-                        set_flow_temp(flows_cool[0], OptimizerZone::ZONE_1);
+                if (status.has_independent_zone_temps()) {
+                    if (heating_demand) {
+                        if (status.is_auto_adaptive_heating(esphome::ecodan::Zone::ZONE_1) &&
+                            status.Zone1FlowTemperatureSetPoint != flows_heat[0])
+                            set_flow_temp(flows_heat[0], OptimizerZone::ZONE_1);
 
-                    if (status.is_auto_adaptive_cooling(esphome::ecodan::Zone::ZONE_2) &&
-                        status.Zone2FlowTemperatureSetPoint != flows_cool[1])
-                        set_flow_temp(flows_cool[1], OptimizerZone::ZONE_2);
+                        if (max_zones > 1 && status.is_auto_adaptive_heating(esphome::ecodan::Zone::ZONE_2) &&
+                            status.Zone2FlowTemperatureSetPoint != flows_heat[1])
+                            set_flow_temp(flows_heat[1], OptimizerZone::ZONE_2);
+
+                    } else if (cooling_demand) {
+                        if (status.is_auto_adaptive_cooling(esphome::ecodan::Zone::ZONE_1) &&
+                            status.Zone1FlowTemperatureSetPoint != flows_cool[0])
+                            set_flow_temp(flows_cool[0], OptimizerZone::ZONE_1);
+
+                        if (status.is_auto_adaptive_cooling(esphome::ecodan::Zone::ZONE_2) &&
+                            status.Zone2FlowTemperatureSetPoint != flows_cool[1])
+                            set_flow_temp(flows_cool[1], OptimizerZone::ZONE_2);
+                    }
+                } else {
+                    if (heating_demand) {
+                        float final_flow = fmax(flows_heat[0], flows_heat[1]);
+                        if (status.Zone1FlowTemperatureSetPoint != final_flow)
+                            set_flow_temp(final_flow, OptimizerZone::SINGLE);
+                    } else if (cooling_demand) {
+                        float final_flow = fmin(flows_cool[0], flows_cool[1]);
+                        if (status.Zone1FlowTemperatureSetPoint != final_flow)
+                            set_flow_temp(final_flow, OptimizerZone::SINGLE);
+                    }
                 }
             } else {
-                if (heating_demand) {
-                    float final_flow = fmax(flows_heat[0], flows_heat[1]);
-                    if (status.Zone1FlowTemperatureSetPoint != final_flow)
-                        set_flow_temp(final_flow, OptimizerZone::SINGLE);
-                } else if (cooling_demand) {
-                    float final_flow = fmin(flows_cool[0], flows_cool[1]);
-                    if (status.Zone1FlowTemperatureSetPoint != final_flow)
-                        set_flow_temp(final_flow, OptimizerZone::SINGLE);
-                }
+                ESP_LOGD(OPTIMIZER_TAG, "Smart Grid OFF active: Ecodan flow commands blocked.");
             }
+
+            // Always evaluate Smart Grid to allow entering/exiting Reco and OFF modes
+            this->evaluate_smart_grid_(status, prof.base_min_delta_t);
 
             this->adaptive_loop_running_ = false;
         }

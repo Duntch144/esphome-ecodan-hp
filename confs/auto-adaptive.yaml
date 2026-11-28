@@ -1,12 +1,10 @@
 globals:
   - id: optimizer_ptr
     type: esphome::optimizer::Optimizer*
-
   - id: lockout_expiration_timestamp
     type: uint32_t
     restore_value: yes
     initial_value: '0'
-
   - id: legionella_saved_dhw_setpoint
     type: float
     restore_value: yes
@@ -18,81 +16,150 @@ substitutions:
 
 esphome:
   on_boot:
-      priority: 600
-      then:
-        - lambda: |-
-            using namespace esphome::optimizer;
-            OptimizerState state = {
-                .lockout_expiration_timestamp = id(lockout_expiration_timestamp)
-            };
+    priority: 600
+    then:
+      - lambda: |-
+          using namespace esphome::optimizer;
+          OptimizerState state = {
+            .lockout_expiration_timestamp = id(lockout_expiration_timestamp)
+          };
+          state.ecodan_instance = id(ecodan_instance);
 
-            state.ecodan_instance = id(ecodan_instance);
+          state.auto_adaptive_control_enabled = id(auto_adaptive_control_enabled);
+          state.predictive_short_cycle_control_enabled = id(predictive_short_cycle_control_enabled);
+          state.defrost_risk_handling_enabled = id(defrost_risk_handling_enabled);
+          state.smart_boost_enabled = id(smart_boost_enabled);
+          ${asgard_prefix} state.bin_odin_forwarder_takeover = id(bin_odin_forwarder_takeover);
 
-            state.auto_adaptive_control_enabled = id(auto_adaptive_control_enabled);
-            state.predictive_short_cycle_control_enabled = id(predictive_short_cycle_control_enabled);
-            state.defrost_risk_handling_enabled = id(defrost_risk_handling_enabled);
-            state.smart_boost_enabled = id(smart_boost_enabled);
-            ${asgard_prefix} state.bin_odin_forwarder_takeover = id(bin_odin_forwarder_takeover);
+          state.status_short_cycle_lockout = id(status_short_cycle_lockout);
+          state.status_predictive_boost_active = id(status_predictive_boost_active);
 
-            state.status_short_cycle_lockout = id(status_short_cycle_lockout);
-            state.status_predictive_boost_active = id(status_predictive_boost_active);
+          // Legionella DHW setpoint automation
+          state.legionella_dhw_automation_enabled = id(legionella_dhw_automation_enabled);
+          state.legionella_dhw_setpoint = id(legionella_dhw_setpoint);
+          state.dhw_climate = id(heatpump_climate_dhw);
+          state.legionella_saved_dhw_setpoint = legionella_saved_dhw_setpoint;
 
-            // Legionella DHW setpoint automation
-            state.legionella_dhw_automation_enabled = id(legionella_dhw_automation_enabled);
-            state.legionella_dhw_setpoint = id(legionella_dhw_setpoint);
-            state.dhw_climate = id(heatpump_climate_dhw);
-            state.legionella_saved_dhw_setpoint = legionella_saved_dhw_setpoint;
+          state.operation_mode = id(operation_mode);
+          state.hp_feed_temp = id(hp_feed_temp);
+          state.z1_feed_temp = id(z1_feed_temp);
+          ${z2_cpp_prefix} state.z2_feed_temp = id(z2_feed_temp);
+          ${asgard_prefix} state.asgard_vt_z1 = id(virtual_climate_z1);
+          ${asgard_prefix}${z2_cpp_prefix} state.asgard_vt_z2 = id(virtual_climate_z2);
+          ${asgard_prefix} state.relay_switch_z1 = id(asgard_relay_z1);
+          ${asgard_prefix}${z2_cpp_prefix} state.relay_switch_z2 = id(asgard_relay_z2);
+          ${asgard_prefix} state.sw_odin_override_z1 = id(sw_odin_override_z1);
+          ${asgard_prefix}${z2_cpp_prefix} state.sw_odin_override_z2 = id(sw_odin_override_z2);
 
-            state.operation_mode = id(operation_mode);
-            state.hp_feed_temp = id(hp_feed_temp);
-            state.z1_feed_temp = id(z1_feed_temp);
-            ${z2_cpp_prefix} state.z2_feed_temp = id(z2_feed_temp);
-            ${asgard_prefix} state.asgard_vt_z1 = id(virtual_climate_z1);
-            ${asgard_prefix} ${z2_cpp_prefix} state.asgard_vt_z2 = id(virtual_climate_z2);
-            ${asgard_prefix} state.relay_switch_z1 = id(asgard_relay_z1);
-            ${asgard_prefix} ${z2_cpp_prefix} state.relay_switch_z2 = id(asgard_relay_z2);
-            ${asgard_prefix} state.sw_odin_override_z1 = id(sw_odin_override_z1);
-            ${asgard_prefix} ${z2_cpp_prefix} state.sw_odin_override_z2 = id(sw_odin_override_z2);
+          state.heating_system_type = id(heating_system_type);
+          state.temperature_feedback_source_z1 = id(temperature_feedback_source_z1);
+          ${z2_cpp_prefix} state.temperature_feedback_source_z2 = id(temperature_feedback_source_z2);
 
-            state.heating_system_type = id(heating_system_type);
-            state.temperature_feedback_source_z1 = id(temperature_feedback_source_z1);
-            ${z2_cpp_prefix} state.temperature_feedback_source_z2 = id(temperature_feedback_source_z2);
+          ${asgard_prefix} state.odin_inherit_max_age = id(odin_inherit_max_age);
+          ${asgard_prefix} state.vt_temp_sensor_source_z1 = id(asgard_vt_temp_sensor_source_z1);
+          ${asgard_prefix}${z2_cpp_prefix} state.vt_temp_sensor_source_z2 = id(asgard_vt_temp_sensor_source_z2);
 
-            ${asgard_prefix} state.odin_inherit_max_age = id(odin_inherit_max_age);
-            ${asgard_prefix} state.vt_temp_sensor_source_z1 = id(asgard_vt_temp_sensor_source_z1);
-            ${asgard_prefix} ${z2_cpp_prefix} state.vt_temp_sensor_source_z2 = id(asgard_vt_temp_sensor_source_z2);
+          state.lockout_duration = id(lockout_duration);
+          state.lockout_strategy = id(lockout_strategy);
+          state.status_compressor = id(status_compressor);
+          state.status_defrost = id(status_defrost);
 
-            state.lockout_duration = id(lockout_duration);
-            state.lockout_strategy = id(lockout_strategy);
-            state.status_compressor = id(status_compressor);
-            state.status_defrost = id(status_defrost);
+          state.auto_adaptive_setpoint_bias = id(auto_adaptive_setpoint_bias);
+          state.temperature_feedback_z1 = id(temperature_feedback_z1);
+          state.temperature_feedback_z2 = id(temperature_feedback_z2);
+          state.maximum_heating_flow_temp = id(maximum_heating_flow_temp);
+          state.minimum_heating_flow_temp = id(minimum_heating_flow_temp);
+          state.maximum_heating_flow_temp_z2 = id(maximum_heating_flow_temp_z2);
+          state.minimum_heating_flow_temp_z2 = id(minimum_heating_flow_temp_z2);
+          state.minimum_cooling_flow_temp_z1 = id(minimum_cooling_flow_temp_z1);
+          ${z2_cpp_prefix} state.minimum_cooling_flow_temp_z2 = id(minimum_cooling_flow_temp_z2);
 
-            state.auto_adaptive_setpoint_bias = id(auto_adaptive_setpoint_bias);
-            state.temperature_feedback_z1 = id(temperature_feedback_z1);
-            state.temperature_feedback_z2 = id(temperature_feedback_z2);
-            state.maximum_heating_flow_temp = id(maximum_heating_flow_temp);
-            state.minimum_heating_flow_temp = id(minimum_heating_flow_temp);
-            state.maximum_heating_flow_temp_z2 = id(maximum_heating_flow_temp_z2);
-            state.minimum_heating_flow_temp_z2 = id(minimum_heating_flow_temp_z2);
-            state.minimum_cooling_flow_temp_z1 = id(minimum_cooling_flow_temp_z1);
-            ${z2_cpp_prefix} state.minimum_cooling_flow_temp_z2 = id(minimum_cooling_flow_temp_z2);
+          state.cooling_smart_start_temp = id(cooling_smart_start_temp);
+          state.minimum_compressor_on_time = id(minimum_compressor_on_time);
 
-            state.cooling_smart_start_temp = id(cooling_smart_start_temp);
-            state.minimum_compressor_on_time = id(minimum_compressor_on_time);
+          // --- PI / Feed-Forward / Smart Grid ---
+          state.total_bias_sensor = id(optimizer_total_bias);
+          state.target_delta_t_sensor = id(optimizer_target_delta_t);
+          state.base_min_delta_t = id(base_min_delta_t);
+          state.max_delta_t = id(max_delta_t);
+          state.integral_gain = id(integral_gain);
 
+          state.sg_overheat_offset = id(sg_overheat_offset);
+          state.sg_storage_offset = id(sg_storage_offset);
+          state.sg_mode_off = id(switch_sg_mode_off);
+          state.sg_mode_reco = id(switch_sg_mode_reco);
+          state.sg_energy_available = id(sg_energy_available);
 
-            // instantiate optimizer
-            id(optimizer_ptr) = new esphome::optimizer::Optimizer(state);
-            ${asgard_prefix} id(odin_forwarder).set_optimizer(id(optimizer_ptr));
+          state.ff_learning_enabled = id(ff_learning_enabled);
+          state.ff_control_enabled = id(ff_control_enabled);
+          state.ff_slope_sensor = id(ff_slope_sensor);
+          state.ff_intercept_sensor = id(ff_intercept_sensor);
 
-
-        - lambda: id(optimizer_ptr)->update_boost_sensor();
-        - lambda: id(optimizer_ptr)->check_lockout_expiration();
+          // instantiate optimizer
+          id(optimizer_ptr) = new esphome::optimizer::Optimizer(state);
+          ${asgard_prefix} id(odin_forwarder).set_optimizer(id(optimizer_ptr));
+      - lambda: id(optimizer_ptr)->update_boost_sensor();
+      - lambda: id(optimizer_ptr)->check_lockout_expiration();
 
 # needed to trigger codegen
 optimizer:
 
 number:
+  - platform: template
+    id: sg_overheat_offset
+    name: ${sg_overheat_offset_name}
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    initial_value: 0.7
+    min_value: 0.1
+    max_value: 2.5
+    step: 0.1
+
+  - platform: template
+    id: sg_storage_offset
+    name: ${sg_storage_offset_name}
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    initial_value: 0.0
+    min_value: 0.0
+    max_value: 5.0
+    step: 0.1
+
+  - platform: template
+    id: base_min_delta_t
+    name: ${base_min_delta_t_name}
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    initial_value: 3.0
+    min_value: 1.0
+    max_value: 5.0
+    step: 0.1
+
+  - platform: template
+    id: max_delta_t
+    name: ${max_delta_t_name}
+    unit_of_measurement: "°C"
+    optimistic: true
+    restore_value: true
+    initial_value: 8.0
+    min_value: 5.0
+    max_value: 15.0
+    step: 0.5
+
+  - platform: template
+    id: integral_gain
+    name: ${integral_gain_name}
+    unit_of_measurement: ""
+    optimistic: true
+    restore_value: true
+    initial_value: 0.05
+    min_value: 0.0
+    max_value: 0.1
+    step: 0.005
+
   - platform: template
     id: maximum_heating_flow_temp
     name: ${maximum_heating_flow_temp}
@@ -103,6 +170,7 @@ number:
     min_value: 25.0
     max_value: 55.0
     step: 0.5
+
   - platform: template
     id: minimum_heating_flow_temp
     name: ${minimum_heating_flow_temp}
@@ -124,6 +192,7 @@ number:
     min_value: 25.0
     max_value: 55.0
     step: 0.5
+
   - platform: template
     id: minimum_heating_flow_temp_z2
     name: ${minimum_heating_flow_temp} z2
@@ -134,6 +203,7 @@ number:
     min_value: 24.0
     max_value: 40.0
     step: 0.5
+
   - platform: template
     id: cooling_smart_start_temp
     unit_of_measurement: "°C"
@@ -155,7 +225,7 @@ number:
     min_value: 5.0
     max_value: 25.0
     step: 0.1
-    
+
   - platform: template
     id: minimum_cooling_flow_temp_z2
     name: ${minimum_cooling_flow_temp} z2
@@ -177,6 +247,7 @@ number:
     min_value: -2.5
     max_value: 2.5
     step: 0.1
+
   - platform: template
     id: temperature_feedback_z1
     name: ${temperature_feedback} z1
@@ -187,6 +258,7 @@ number:
     min_value: -50
     max_value: 100
     step: 0.1
+
   - platform: template
     id: temperature_feedback_z2
     name: ${temperature_feedback} z2
@@ -245,6 +317,7 @@ select:
       - "${select_feedback_option_api}"
       - "${select_feedback_option_asgard_vt}"
     initial_option: "${temperature_feedback_option_room}"
+
   - platform: template
     id: temperature_feedback_source_z2
     name: ${temperature_feedback_source} z2
@@ -266,7 +339,7 @@ select:
       - "${heating_system_type_option_ufh} *"
       - "${heating_system_type_option_ufh_rad}"
       - "${heating_system_type_option_ufh_rad} *"
-      - "${heating_system_type_option_rad}" 
+      - "${heating_system_type_option_rad}"
       - "${heating_system_type_option_rad} *"
     initial_option: "${heating_system_type_option_ufh}"
 
@@ -330,7 +403,6 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     optimistic: true
 
-
   - platform: template
     id: legionella_dhw_automation_enabled
     name: "Legionella: DHW Setpoint Automation"
@@ -338,10 +410,41 @@ switch:
     restore_mode: RESTORE_DEFAULT_OFF
     icon: "mdi:shield-water"
 
+  - platform: template
+    name: ${sg_mode_off_name}
+    id: switch_sg_mode_off
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+
+  - platform: template
+    name: ${sg_mode_reco_name}
+    id: switch_sg_mode_reco
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+
+  - platform: template
+    id: sg_energy_available
+    name: ${sg_energy_available_name}
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+
+  - platform: template
+    name: "FF Learning Enabled"
+    id: ff_learning_enabled
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+
+  - platform: template
+    name: "FF Control Enabled"
+    id: ff_control_enabled
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+
 binary_sensor:
   - platform: template
     id: status_predictive_boost_active
     name: ${status_predictive_boost_active}
+
   - platform: ecodan
     status_short_cycle_lockout:
       id: status_short_cycle_lockout
@@ -356,26 +459,117 @@ button:
           level: INFO
           format: "Lockout script cancelled by button"
       - lambda: id(optimizer_ptr)->restore_pre_lockout_state();
-  # - platform: template
-  #   name: 'Auto-Adaptive: Run'
-  #   id: run_auto_adaptive_cycle
-  #   icon: "mdi:play-circle"
-  #   on_press:
-  #     then:
-  #     - lambda: |-
-  #         id(optimizer_ptr)->run_auto_adaptive_loop();
 
-  # - platform: template
-  #   name: "Short-Cycle: Start Compressor (Simulated)"
-  #   on_press:
-  #     - lambda: |-
-  #         id(status_compressor).publish_state(true);
+  - platform: template
+    id: calculate_regression_button
+    name: "FF Calculate Regression"
+    on_press:
+      - logger.log:
+          level: INFO
+          format: "Feed Forward regression calculation triggered by button"
+      - lambda: id(optimizer_ptr)->calculate_regression();
 
-  # - platform: template
-  #   name: "Short-Cycle: Stop Compressor (Simulated)"
-  #   on_press:
-  #     - lambda: |-
-  #         id(status_compressor).publish_state(false);
+  - platform: template
+    name: "FF Reset Model"
+    id: ff_reset_model_button
+    on_press:
+      - logger.log:
+          level: WARN
+          format: "Feed Forward model reset by user - will relearn from scratch"
+      - lambda: id(optimizer_ptr)->reset_ff_model();
+
+sensor:
+  - platform: template
+    id: optimizer_total_bias
+    name: ${optimizer_total_bias}
+    unit_of_measurement: "°C"
+    accuracy_decimals: 3
+    device_class: "temperature"
+    state_class: "measurement"
+    force_update: true
+    retain: true
+
+  - platform: template
+    id: optimizer_target_delta_t
+    name: ${optimizer_target_delta_t}
+    unit_of_measurement: "°C"
+    accuracy_decimals: 3
+    device_class: "temperature"
+    state_class: "measurement"
+    force_update: true
+    retain: true
+
+  - platform: template
+    id: ff_slope_sensor
+    name: "FF Slope"
+    unit_of_measurement: ""
+    accuracy_decimals: 4
+    state_class: "measurement"
+    force_update: true
+    retain: true
+
+  - platform: template
+    id: ff_intercept_sensor
+    name: "FF Intercept"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 4
+    device_class: "temperature"
+    state_class: "measurement"
+    force_update: true
+    retain: true
+
+  - platform: template
+    name: "FF Updates Count"
+    id: ff_updates_count_sensor
+    update_interval: 60s
+    unit_of_measurement: "updates"
+    state_class: "total_increasing"
+    icon: "mdi:counter"
+    lambda: |-
+      if (id(optimizer_ptr) == nullptr) return NAN;
+      return id(optimizer_ptr)->get_ff_updates_count();
+
+  - platform: template
+    name: "FF Alpha"
+    id: ff_alpha_sensor
+    update_interval: 60s
+    accuracy_decimals: 4
+    icon: "mdi:alpha"
+    lambda: |-
+      if (id(optimizer_ptr) == nullptr) return NAN;
+      return id(optimizer_ptr)->get_last_alpha();
+
+  - platform: template
+    name: "FF Convergence"
+    id: ff_convergence_sensor
+    update_interval: 60s
+    unit_of_measurement: "%"
+    accuracy_decimals: 3
+    icon: "mdi:chart-line"
+    lambda: |-
+      if (id(optimizer_ptr) == nullptr) return NAN;
+      return id(optimizer_ptr)->get_convergence_metric();
+
+  - platform: template
+    name: "FF Slope Variance"
+    id: ff_slope_variance_sensor
+    update_interval: 60s
+    accuracy_decimals: 6
+    icon: "mdi:sigma"
+    lambda: |-
+      if (id(optimizer_ptr) == nullptr) return NAN;
+      return id(optimizer_ptr)->get_ff_slope_variance();
+
+  - platform: template
+    name: "FF Learning Buffer Size"
+    id: ff_learning_buffer_size_sensor
+    update_interval: 60s
+    unit_of_measurement: "points"
+    icon: "mdi:database"
+    lambda: |-
+      if (id(optimizer_ptr) == nullptr) return NAN;
+      return id(optimizer_ptr)->get_learning_buffer_size();
+
 interval:
   - interval: 30s
     then:

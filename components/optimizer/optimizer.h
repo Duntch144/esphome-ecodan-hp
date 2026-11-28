@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <utility>
+#include <vector>
 #include "optimizer_state.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -52,8 +54,6 @@ namespace esphome
               case 1:   return OptimizerOperationMode::DHW_ON;
               case 2:   return OptimizerOperationMode::HEAT_ON;
               case 3:   return OptimizerOperationMode::COOL_ON;
-              //case 5:   return OptimizerOperationMode::FROST_PROTECT;
-              //case 6:   return OptimizerOperationMode::LEGIONELLA_PREVENTION;
               case 255: return OptimizerOperationMode::UNAVAILABLE;
               default:  return OptimizerOperationMode::OFF;
           }
@@ -66,6 +66,7 @@ namespace esphome
 
       const float MAX_FEED_STEP_CHANGE = 1.0f;
       const float MAX_FEED_STEP_ADJUSTMENT = 1.0f;
+      static constexpr float MAX_INTEGRAL_BIAS = 3.0f;
 
       uint32_t compressor_start_time_ = 0;
       uint32_t last_defrost_time_     = 0;
@@ -84,12 +85,46 @@ namespace esphome
       float last_error_                = 0.0f;
       float current_stagnation_boost_  = 1.0f;
 
+      // ── PI Controller (Zone 1) ────────────────────────────────────────
+      float last_room_temp_z1_{NAN};
+      uint32_t last_derivative_time_{0};
+      float derivative_term_{0.0f};
+      float integral_error_z1_{0.0f};
+      esphome::ESPPreferenceObject integral_pref_;
+      float last_saved_integral_{NAN};
+      float target_delta_t_{0.0f};
+      float total_bias_{NAN};
+
+      // ── Feed-Forward & Incremental Learning ───────────────────────────
+      float ff_slope_{0.0f};
+      float ff_intercept_{0.0f};
+      esphome::ESPPreferenceObject ff_slope_pref_;
+      esphome::ESPPreferenceObject ff_intercept_pref_;
+      std::vector<std::pair<float, float>> learning_data_;
+
+      int ff_updates_count_{0};
+      esphome::ESPPreferenceObject ff_updates_pref_;
+      float ff_slope_variance_{NAN};
+      float ff_intercept_variance_{NAN};
+      float last_alpha_{0.0f};
+      float last_slope_change_pct_{0.0f};
+
+      // ── Thermal Inertia Learning ──────────────────────────────────────
+      float thermal_time_constant_{300.0f};
+      float thermal_time_constant_filtered_{300.0f};
+      float last_flow_setpoint_change_{NAN};
+      uint32_t last_flow_change_time_{0};
+      float moving_avg_temperature_rate_{0.0f};
+      float last_recorded_room_temp_{NAN};
+      std::vector<std::pair<float, float>> thermal_inertia_data_;
+      esphome::ESPPreferenceObject thermal_tau_pref_;
+      float last_saved_tau_{NAN};
 
       bool adaptive_loop_running_ {false};
 
-      // ── adaptive_loop.cpp ──────────────────────────────────────────────
+      // ── auto_adaptive.cpp ─────────────────────────────────────────────
       HeatingProfile   get_heating_profile_(int type_index);
-      DefrostState resolve_defrost_state_();
+      DefrostState     resolve_defrost_state_();
       float            calculate_heating_flow_(std::size_t zone_i,
                                                const ecodan::Status &status,
                                                const HeatingProfile &prof,
@@ -111,9 +146,12 @@ namespace esphome
                                               float &out_flow_heat,
                                               float &out_flow_cool);
 
+      // ── pi_feedforward.cpp ────────────────────────────────────────────
+      float compute_adaptive_alpha(int n_updates, float quality, float old_value, float new_value);
+      void  evaluate_smart_grid_(const ecodan::Status &status, float base_min_delta_t);
+
       // ── smart_boost.cpp ───────────────────────────────────────────────
       float calculate_smart_boost(int profile, float error);
-
 
       // ── events.cpp ────────────────────────────────────────────────────
       void on_feed_temp_change(float actual_flow_temp, OptimizerZone zone);
@@ -162,6 +200,18 @@ namespace esphome
       bool get_predictive_boost_state();
       void update_boost_sensor();
 
+      // PI / Feed-Forward / Thermal Inertia / Smart Grid
+      void   calculate_regression();
+      void   calculate_thermal_inertia();
+      void   reset_ff_model();
+      bool   get_sg_energy_available() const;
+      int    get_ff_updates_count() const;
+      float  get_last_alpha() const;
+      float  get_convergence_metric() const;
+      float  get_ff_slope_variance() const;
+      size_t get_learning_buffer_size() const;
+      size_t get_thermal_inertia_buffer_size() const;
+
       // Temperature helpers (used by YAML / dashboard)
       float get_room_current_temp(OptimizerZone zone);
       float room_temp_and_source(OptimizerZone zone, int *answered);
@@ -184,7 +234,6 @@ namespace esphome
       bool predictive_cycle_enabled() const;
       bool odin_forwarder_takeover_active() const;
       bool odin_owns_flow_setpoint() const;
-      // The ODIN forwarder registers itself here (OdinRoomFeed, optimizer_state.h).
       void set_odin_room_feed(OdinRoomFeed *feed);
     };
 

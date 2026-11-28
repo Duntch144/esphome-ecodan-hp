@@ -205,3 +205,16 @@ substitutions:
   num_raw_cool_elec_consumed_z2: "Raw Cool Electricity Consumed Z2"
   num_raw_cool_runtime_hours_z2: "Raw Cool Runtime Z2"
   num_raw_cool_avg_room_temp_z2: "Raw Cool Avg Room Temp Z2"
+
+  # PI Controller
+  base_min_delta_t_name: 'Auto-Adaptive: Min Delta T'
+  max_delta_t_name: 'Auto-Adaptive: Max Delta T'
+  integral_gain_name: 'Auto-Adaptive: Auto Bias Gain'
+  optimizer_total_bias: 'Auto-Adaptive: Total Setpoint Bias'
+  optimizer_target_delta_t: 'Auto-Adaptive: Effective Delta T'
+  sg_mode_off_name: 'Auto-Adaptive: SG Mode Off'
+  sg_mode_reco_name: 'Auto-Adaptive: SG Mode Reco'
+  sg_overheat_offset_name: 'Auto-Adaptive: SG Overheat Offset'
+  sg_storage_offset_name: 'Auto-Adaptive: SG Storage Offset'
+  sg_energy_available_name: 'Auto-Adaptive: SG Energy Available'
+  thermal_time_constant: 'Auto-Adaptive: Thermal Time Constant'
